@@ -187,8 +187,6 @@ def diagnose(chromosome):
             else: room_usage[r_key] = True
             if p_key in prof_usage: prof_c += 1
             else: prof_usage[p_key] = True
-    print(f"  Day violations:   {day_c}  ← should always be 0")
-    print(f"  Room size errors: {size_c} ← should always be 0")
     print(f"  Room overlaps:    {room_c}")
     print(f"  Prof overlaps:    {prof_c}")
     print(f"  Score:            {-(room_c + prof_c)}")
