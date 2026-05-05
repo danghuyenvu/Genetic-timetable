@@ -3,18 +3,28 @@ import random
 import matplotlib.pyplot as plt
 from collections import defaultdict
 import time
+DAY_NAME = {2: "Mon", 3: "Tue", 4: "Wed", 5: "Thu", 6: "Fri"}
 
-# --- 1. CONFIGURATION ---
+# --- CONFIGURATION ---
 NUM_COURSES = 15
 SECTIONS_PER_COURSE = 10
 NUM_PROFESSORS = 10
 DAYS = [2, 3, 4, 5, 6]  # Mon, Tue, Wed, Thu, Fri
 TIMESLOTS = [1, 2, 3, 4, 5, 6]
 NUM_ROOMS = 30
+REPAIR_TIMES = 20
 
 # Room Sizes: 0 for Small, 1 for Large
 ROOM_SIZES = [random.randint(0, 1) for r in range(1, NUM_ROOMS + 1)]
 ROOM_BIG = []
+
+CLASS_SIZE = [random.randint(0, 1) for r in range(NUM_COURSES)]
+
+# --- GA SETTINGS ---
+POP_SIZE = 200
+GEN = 400
+MUTATION_RATE = 0.2
+TOP_ELITE = int(0.05 * POP_SIZE)
 
 for room in range(NUM_ROOMS):
     if ROOM_SIZES[room] == 1:
@@ -60,7 +70,7 @@ def build_professor_map():
 
 PROF_MAP, PROF_COURSES = build_professor_map()
 
-# --- 2. DATA CLASSES ---
+# --- DATA CLASSES ---
 class Slot:
     def __init__(self, day, timeslot):
         self.day = day
@@ -73,7 +83,7 @@ class Section:
         self.course_id = course_id
         self.section_id = section_id
         # FIXED ATTRIBUTES
-        self.size = random.randint(0, 1)  # 0: Small registration, 1: Large
+        self.size = CLASS_SIZE[course_id - 1]  # 0: Small registration, 1: Large
         self.lecturer = PROF_MAP[course_id][section_id]
 
         # VARIABLE ATTRIBUTES (The Genes)
@@ -139,7 +149,7 @@ def repair(chromosome):
             key = (slot.day, slot.timeslot, sec.lecturer)
             if key in prof_usage:
                 # Conflict found — reassign this section's slots
-                for _ in range(10):  # try up to 20 random reassignments
+                for _ in range(REPAIR_TIMES):  # try up to 20 random reassignments
                     new_slot1 = random.choice(PROFESSOR_SLOT[sec.lecturer])
                     remaining = [i for i in PROFESSOR_SLOT[sec.lecturer] if abs(i.day - new_slot1.day) > 1]
                     if not remaining:
@@ -182,21 +192,40 @@ def diagnose(chromosome):
     print(f"  Room overlaps:    {room_c}")
     print(f"  Prof overlaps:    {prof_c}")
     print(f"  Score:            {-(room_c + prof_c)}")
-    
-# --- 3. GA SETTINGS ---
-POP_SIZE = 200
-GEN = 1000
-MUTATION_RATE = 0.2
-TOP_ELITE = int(0.1 * POP_SIZE)
+
+def print_professor_tables(chromosome):
+    # Group sections by lecturer
+    prof_sections = defaultdict(list)
+    for s in chromosome:
+        prof_sections[s.lecturer].append(s)
+
+    for prof_id in sorted(prof_sections.keys()):
+        sections = prof_sections[prof_id]
+        print(f"\n{'='*72}")
+        print(f"  PROFESSOR {prof_id}")
+        print(f"{'='*72}")
+        print(f"{'Course-Sec':<12} {'Session':<10} {'Day':<6} {'Slot':<6} {'Room':<6} {'RmSz':<6} {'ClSz'}")
+        print(f"{'-'*72}")
+
+        # Sort by course then section for readability
+        for s in sorted(sections, key=lambda x: (x.course_id, x.section_id)):
+            course_sec = f"C{s.course_id}-S{s.section_id}"
+            room_size  = ROOM_SIZES[s.room - 1]
+
+            print(f"{course_sec:<12} {'Session 1':<10} {DAY_NAME[s.slot1.day]:<6} {s.slot1.timeslot:<6} R{s.room:<5} {room_size:<6} {s.size}")
+            print(f"{'.'*12} {'Session 2':<10} {DAY_NAME[s.slot2.day]:<6} {s.slot2.timeslot:<6} R{s.room:<5} {room_size:<6} {s.size}")
+
+        print(f"{'-'*72}")
+        print(f"  Total sections: {len(sections)}")
 
 # Initialize Population
 population = [[Section(c, s) for c in range(1, 16) for s in range(1, 11)] for _ in range(POP_SIZE)]
 history = []
+history_average = []
 best_fit = 0.0
 total_generations = 0
 GOAT_table = None
 GOAT_score = -float("inf")
-
 
 if __name__ == "__main__":
     start = time.perf_counter()
@@ -206,6 +235,7 @@ if __name__ == "__main__":
         ranked = sorted(range(POP_SIZE), key=lambda i: fitnesses[i], reverse=True)
 
         best_fit = fitnesses[ranked[0]]
+        history_average.append((sum(fitnesses) / len(fitnesses)))
         history.append(best_fit)
         if best_fit > GOAT_score:
             GOAT_score = best_fit
@@ -241,15 +271,28 @@ if __name__ == "__main__":
     print(f"Total {end - start:.4f} seconds for {GEN} generations")
 
     # --- 4. RESULTS ---
-    plt.plot(history)
-    plt.title("Fitness Evolution (Higher is Better)")
-    plt.xlabel("Generation")
-    plt.ylabel("Fitness Score")
+    # Create a figure with 1 row and 2 columns of subplots
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # First plot: history
+    axes[0].plot(history)
+    axes[0].set_title("Fitness Evolution")
+    axes[0].set_xlabel("Generation")
+    axes[0].set_ylabel("Fitness Score")
+
+    # Second plot: history_average
+    axes[1].plot(history_average, color="orange")
+    axes[1].set_title("Average Fitness Evolution")
+    axes[1].set_xlabel("Generation")
+    axes[1].set_ylabel("Average Fitness Score")
+
+    plt.tight_layout()
     plt.show()
 
     # Display snippet of best schedule
     diagnose(GOAT_table)
     print(f"Best Fitness score: {GOAT_score}")
-    print("Best Schedule (Course-Section | Prof | Day1-Slot1 | Day2-Slot2 | Room | Room Size | class size)")
-    for s in GOAT_table:
-        print(f"C{s.course_id}-S{s.section_id} | P{s.lecturer} | {s.slot1.day}-{s.slot1.timeslot} | {s.slot2.day}-{s.slot2.timeslot} | R{s.room} | {ROOM_SIZES[s.room - 1]} | {s.size}")
+    # print("Best Schedule (Course-Section | Prof | Day1-Slot1 | Day2-Slot2 | Room | Room Size | class size)")
+    # for s in GOAT_table:
+    #     print(f"C{s.course_id}-S{s.section_id} | P{s.lecturer} | {s.slot1.day}-{s.slot1.timeslot} | {s.slot2.day}-{s.slot2.timeslot} | R{s.room} | {ROOM_SIZES[s.room - 1]} | {s.size}")
+    print_professor_tables(GOAT_table)
